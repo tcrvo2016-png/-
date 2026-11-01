@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seismic Globe</title>
+<script src="https://unpkg.com/globe.gl@2.32.0/dist/globe.gl.min.js"></script>
+<style>
+  :root {
+    --bg: #05070d; --panel: rgba(14, 19, 31, 0.92); --border: #243049;
+    --text: #e6ebf5; --muted: #8a96ad; --accent: #4fa3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", Arial, sans-serif; overflow: hidden; }
+  #globe { position: absolute; inset: 0; }
+
+  .panel { position: absolute; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px; backdrop-filter: blur(6px); z-index: 2; }
+  #filters { top: 16px; right: 16px; width: 290px; max-height: calc(100% - 32px); overflow-y: auto; }
+  #filters h1 { font-size: 17px; margin: 0 0 4px; }
+  #filters .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select, button { width: 100%; padding: 7px 8px; border-radius: 7px; font: inherit; font-size: 13px;
+    background: #0b1020; color: var(--text); border: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; } .row > div { flex: 1; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 10px; }
+  .check input { width: auto; }
+  button { margin-top: 14px; background: var(--accent); border: none; color: #fff; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  #status { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+  #status b { color: var(--text); }
+
+  #legend { bottom: 16px; right: 16px; width: 290px; font-size: 12px; }
+  #legend h3 { margin: 0 0 8px; font-size: 13px; }
+  .sw { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid #ffffff33; }
+  .depthbar { height: 10px; border-radius: 5px; margin: 6px 0 2px;
+    background: linear-gradient(to left, #ff8c1a, #7a4610); }
+  .depthlbl { display: flex; justify-content: space-between; color: var(--muted); }
+
+  #info { top: 16px; left: 16px; width: 330px; display: none; max-height: calc(100% - 32px); overflow-y: auto; }
+  #info .close { position: absolute; top: 8px; left: 10px; cursor: pointer; color: var(--muted); font-size: 18px; }
+  #info h2 { margin: 0 0 4px; font-size: 26px; }
+  #info .place { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  #info table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #info td { padding: 5px 0; border-bottom: 1px solid #1c2538; vertical-align: top; }
+  #info td:first-child { color: var(--muted); width: 42%; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .b-ok { background: #123d22; color: #6ee79a; } .b-warn { background: #4a3208; color: #ffc457; }
+  .b-bad { background: #4a0d12; color: #ff7b85; } .b-mute { background: #222b3d; color: #aab4c8; }
+  .src { font-size: 12px; margin-top: 10px; }
+  .src div { padding: 4px 0; border-bottom: 1px dashed #1c2538; }
+  a { color: var(--accent); }
+
+  @media (max-width: 760px) {
+    #filters { width: auto; left: 16px; max-height: 45%; }
+    #legend { display: none; }
+    #info { top: auto; bottom: 16px; right: 16px; width: auto; max-height: 50%; }
+  }
+</style>
+</head>
+<body>
+<div id="globe"></div>
+
+<!-- סרגל סינון -->
+<div id="filters" class="panel">
+  <h1>🌍 גלובוס סייסמי</h1>
+  <div class="sub">USGS + EMSC בהצלבה, נתונים חיים</div>
+
+  <div class="row">
+    <div><label>מתאריך</label><input type="date" id="fStart"></div>
+    <div><label>עד תאריך</label><input type="date" id="fEnd"></div>
+  </div>
+  <div class="row">
+    <div><label>עוצמה מינ'</label><input type="number" id="fMinMag" value="2.5" step="0.1" min="0" max="10"></div>
+    <div><label>עוצמה מקס'</label><input type="number" id="fMaxMag" value="10" step="0.1" min="0" max="10"></div>
+  </div>
+  <div class="row">
+    <div><label>עומק מינ' (ק"מ)</label><input type="number" id="fMinDepth" value="0" min="0" max="800"></div>
+    <div><label>עומק מקס' (ק"מ)</label><input type="number" id="fMaxDepth" value="800" min="0" max="800"></div>
+  </div>
+  <label>אזור גיאוגרפי</label>
+  <select id="fRegion">
+    <option value="world">כל העולם</option>
+    <option value="mideast">המזרח התיכון וישראל</option>
+    <option value="med">אגן הים התיכון</option>
+    <option value="japan">יפן</option>
+    <option value="indonesia">אינדונזיה והפיליפינים</option>
+    <option value="california">קליפורניה ומערב ארה"ב</option>
+    <option value="alaska">אלסקה והאיים האלאוטיים</option>
+    <option value="andes">צ'ילה ופרו</option>
+    <option value="nz">ניו זילנד וטונגה</option>
+  </select>
+  <label class="check"><input type="checkbox" id="fEmsc" checked> הצלבה מול EMSC</label>
+  <label class="check"><input type="checkbox" id="fVerified"> רק אירועים מאומתים (2+ מקורות)</label>
+  <button id="btnLoad">טען נתונים</button>
+  <div id="status">טוען…</div>
+</div>
+
+<!-- מקרא -->
+<div id="legend" class="panel">
+  <h3>עוצמה (צבע) · גודל העיגול ∝ עוצמה ועומק</h3>
+  <div class="sw"><span class="dot" style="background:#3ddc84"></span> &lt; 3.0 · חלשה</div>
+  <div class="sw"><span class="dot" style="background:#ffe14d"></span> 3.0–4.4 · קלה</div>
+  <div class="sw"><span class="dot" style="background:#ff8c1a"></span> 4.5–5.9 · בינונית</div>
+  <div class="sw"><span class="dot" style="background:#ff2d2d"></span> 6.0–6.9 · חזקה</div>
+  <div class="sw"><span class="dot" style="background:#b026ff"></span> 7.0–7.9 · חזקה מאוד</div>
+  <div class="sw"><span class="dot" style="background:#1a0026;border-color:#b026ff"></span> 8.0+ · הרסנית</div>
+  <h3 style="margin-top:10px">עומק המוקד (גוון)</h3>
+  <div class="depthbar"></div>
+  <div class="depthlbl"><span>רדוד (0)</span><span>עמוק (700 ק"מ)</span></div>
+  <div class="sw" style="margin-top:8px">◎ טבעות פועמות = 24 השעות האחרונות</div>
+</div>
+
+<!-- פאנל מידע -->
+<div id="info" class="panel"><span class="close" id="infoClose">✕</span><div id="infoBody"></div></div>
+
+<script>
+// ---------------------------------------------------------------- config
+const IMG = 'https://unpkg.com/three-globe@2.31.0/example/img/';
+const REGIONS = { // [minLat, maxLat, minLon, maxLon]
+  world: null,
+  mideast:    [12, 42, 25, 63],
+  med:        [30, 47, -10, 37],
+  japan:      [24, 46, 122, 150],
+  indonesia:  [-12, 21, 94, 142],
+  california: [31, 50, -128, -112],
+  alaska:     [50, 72, -180, -140],
+  andes:      [-56, 0, -82, -64],
+  nz:         [-50, -14, 165, 180],
+};
+const MATCH = { seconds: 90, km: 150, mag: 1.0 }; // ספי ההצלבה בין מקורות
+const REFRESH_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------- helpers
+const $ = id => document.getElementById(id);
+const DAY = 864e5;
+const isoDate = d => d.toISOString().slice(0, 10);
+
+function haversineKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const median = arr => { const s = [...arr].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+function magColor(m) {
+  if (m >= 8) return '#1a0026';
+  if (m >= 7) return '#b026ff';
+  if (m >= 6) return '#ff2d2d';
+  if (m >= 4.5) return '#ff8c1a';
+  if (m >= 3) return '#ffe14d';
+  return '#3ddc84';
+}
+// מכהה את הצבע ככל שהמוקד עמוק יותר (עד 55% בעומק 700 ק"מ)
+function depthShade(hex, depth, alpha = 1) {
+  const k = 1 - Math.min(Math.max(depth, 0) / 700, 1) * 0.55;
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round((n >> 16) * k), g = Math.round(((n >> 8) & 255) * k), b = Math.round((n & 255) * k);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+// רדיוס "השפעה" משוער בק"מ: גדל לוגריתמית עם העוצמה, מצטמצם עם עומק המוקד
+function impactRadiusKm(mag, depth) {
+  return Math.pow(10, 0.36 * mag + 0.4) / (1 + Math.max(depth, 0) / 300);
+}
+const kmToDeg = km => km / 111.32;
+
+function tsunamiAssessment(ev) {
+  if (ev.tsunamiFlag) return { cls: 'b-bad', text: 'דגל צונאמי פעיל (USGS) — בדוק מול PTWC / NTWC' };
+  if (ev.mag >= 7 && ev.depth <= 100) return { cls: 'b-bad', text: 'פוטנציאל צונאמי גבוה (M≥7, מוקד רדוד)' };
+  if (ev.mag >= 6.5 && ev.depth <= 70) return { cls: 'b-warn', text: 'פוטנציאל צונאמי מקומי אפשרי' };
+  return { cls: 'b-ok', text: 'צונאמי לא צפוי' };
+}
+
+// ---------------------------------------------------------------- data sources
+async function fetchUSGS(q) {
+  const u = new URL('https://earthquake.usgs.gov/fdsnws/event/1/query');
+  const p = { format: 'geojson', starttime: q.start, endtime: q.end, minmagnitude: q.minMag, maxmagnitude: q.maxMag,
+              mindepth: q.minDepth, maxdepth: q.maxDepth, orderby: 'time', limit: 6000 };
+  if (q.bbox) Object.assign(p, { minlatitude: q.bbox[0], maxlatitude: q.bbox[1], minlongitude: q.bbox[2], maxlongitude: q.bbox[3] });
+  Object.entries(p).forEach(([k, v]) => u.searchParams.set(k, v));
+  const res = await fetch(u);
+  if (!res.ok) throw new Error(`USGS HTTP ${res.status}`);
+  const json = await res.json();
+  return json.features.map(f => {
+    const [lon, lat, depth] = f.geometry.coordinates, pr = f.properties;
+    return { agency: 'USGS', id: f.id, lat, lon, depth: depth ?? 0, mag: pr.mag ?? 0, magType: pr.magType,
+             time: pr.time, place: pr.place, tsunamiFlag: pr.tsunami === 1, alert: pr.alert, url: pr.url };
+  });
+}
+
+async function fetchEMSC(q) {
+  const u = new URL('https://www.seismicportal.eu/fdsnws/event/1/query');
+  const p = { format: 'json', starttime: q.start, endtime: q.end, minmag: q.minMag, maxmag: q.maxMag,
+              mindepth: q.minDepth, maxdepth: q.maxDepth, orderby: 'time', limit: 6000 };
+  if (q.bbox) Object.assign(p, { minlat: q.bbox[0], maxlat: q.bbox[1], minlon: q.bbox[2], maxlon: q.bbox[3] });
+  Object.entries(p).forEach(([k, v]) => u.searchParams.set(k, v));
+  const res = await fetch(u);
+  if (res.status === 204) return [];
+  if (!res.ok) throw new Error(`EMSC HTTP ${res.status}`);
+  const json = await res.json();
+  return json.features.map(f => {
+    const pr = f.properties;
+    return { agency: 'EMSC', id: pr.unid, lat: pr.lat, lon: pr.lon, depth: pr.depth ?? 0, mag: pr.mag ?? 0,
+             magType: pr.magtype, time: Date.parse(pr.time), place: pr.flynn_region,
+             url: `https://www.seismicportal.eu/eventdetails.html?unid=${pr.unid}` };
+  });
+}
+
+// ---------------------------------------------------------------- cross-referencing
+// כל אירוע מאוחד מחזיק רשימת דיווחים (reports) מכל סוכנות; עוצמה ומיקום נגזרים בקונצנזוס.
+function crossReference(lists) {
+  const events = [];
+  for (const list of lists) {
+    const sorted = [...list].sort((a, b) => a.time - b.time);
+    for (const r of sorted) {
+      let best = null, bestScore = Infinity;
+      for (const ev of events) {
+        if (ev.reports.some(x => x.agency === r.agency)) continue; // סוכנות אחת = דיווח אחד לאירוע
+        const dt = Math.abs(ev.time - r.time) / 1000;
+        if (dt > MATCH.seconds) continue;
+        const dkm = haversineKm(ev, r), dm = Math.abs(ev.mag - r.mag);
+        if (dkm > MATCH.km || dm > MATCH.mag) continue;
+        const score = dt / MATCH.seconds + dkm / MATCH.km + dm / MATCH.mag;
+        if (score < bestScore) { bestScore = score; best = ev; }
+      }
+      if (best) { best.reports.push(r); consolidate(best); }
+      else { const ev = { reports: [r] }; consolidate(ev); events.push(ev); }
+    }
+  }
+  return events;
+}
+
+function consolidate(ev) {
+  const R = ev.reports, primary = R.find(r => r.agency === 'USGS') || R[0];
+  ev.id = primary.id;
+  ev.mag = +median(R.map(r => r.mag)).toFixed(1);
+  ev.lat = median(R.map(r => r.lat));
+  ev.lon = median(R.map(r => r.lon));
+  ev.depth = median(R.map(r => r.depth));
+  ev.time = primary.time;
+  ev.place = primary.place;
+  ev.magType = primary.magType;
+  ev.url = primary.url;
+  ev.tsunamiFlag = R.some(r => r.tsunamiFlag);
+  ev.alert = primary.alert;
+  ev.verified = new Set(R.map(r => r.agency)).size >= 2;
+  ev.magSpread = Math.max(...R.map(r => r.mag)) - Math.min(...R.map(r => r.mag));
+  ev.locSpreadKm = R.length > 1 ? Math.max(...R.map(r => haversineKm(r, ev))) : 0;
+}
+
+// ---------------------------------------------------------------- globe
+const globe = Globe()($('globe'))
+  .globeImageUrl(IMG + 'earth-blue-marble.jpg')
+  .bumpImageUrl(IMG + 'earth-topology.png')
+  .backgroundImageUrl(IMG + 'night-sky.png')
+  .atmosphereColor('#4fa3ff').atmosphereAltitude(0.18)
+  // עיגולים: רדיוס במעלות = רדיוס השפעה, גובה נמוך כדי שייראו כדיסקיות על פני השטח
+  .pointLat('lat').pointLng('lon')
+  .pointRadius(d => Math.max(0.12, kmToDeg(impactRadiusKm(d.mag, d.depth))))
+  .pointAltitude(d => 0.002 + Math.max(d.mag, 0) * 0.0015)
+  .pointColor(d => depthShade(magColor(d.mag), d.depth, d.mag >= 8 ? 0.95 : 0.72))
+  .pointResolution(32)
+  .pointsMerge(false)
+  .pointsTransitionDuration(0)
+  .pointLabel(d => `<div style="background:#0b1020e6;padding:6px 9px;border-radius:6px;font:12px system-ui;direction:rtl">
+      <b>M${d.mag.toFixed(1)}</b> · ${Math.round(d.depth)} ק"מ<br><bdi>${d.place ?? ''}</bdi><br>
+      <span style="color:#8a96ad">${new Date(d.time).toLocaleString('he-IL')}</span></div>`)
+  .onPointClick(showInfo)
+  // אפקט פעימה לאירועי 24 השעות האחרונות
+  .ringLat('lat').ringLng('lon')
+  .ringColor(d => t => depthShade(magColor(d.mag) === '#1a0026' ? '#b026ff' : magColor(d.mag), d.depth, 1 - t))
+  .ringMaxRadius(d => Math.min(12, Math.max(1.5, kmToDeg(impactRadiusKm(d.mag, d.depth)) * 2.5)))
+  .ringPropagationSpeed(d => 1 + d.mag * 0.3)
+  .ringRepeatPeriod(d => 1800 - Math.min(d.mag, 8) * 120);
+
+globe.controls().autoRotate = true;
+globe.controls().autoRotateSpeed = 0.35;
+$('globe').addEventListener('pointerdown', () => { globe.controls().autoRotate = false; });
+window.addEventListener('resize', () => globe.width(innerWidth).height(innerHeight));
+
+// ---------------------------------------------------------------- info panel
+function showInfo(ev) {
+  globe.controls().autoRotate = false;
+  globe.pointOfView({ lat: ev.lat, lng: ev.lon, altitude: 1.4 }, 1000);
+  const ts = tsunamiAssessment(ev), t = new Date(ev.time);
+  const ageH = (Date.now() - ev.time) / 36e5;
+  const verify = ev.verified
+    ? `<span class="badge b-ok">מאומת · ${ev.reports.length} מקורות</span>`
+    : `<span class="badge b-mute">מקור יחיד</span>`;
+  const reports = ev.reports.map(r => `<div><b>${r.agency}</b> · M${r.mag.toFixed(1)} ${r.magType ?? ''} · ${Math.round(r.depth)} ק"מ ·
+      ${new Date(r.time).toISOString().slice(11, 19)} UTC ${r.url ? `· <a href="${r.url}" target="_blank" rel="noopener">פרטים</a>` : ''}</div>`).join('');
+  $('infoBody').innerHTML = `
+    <h2 style="color:${ev.mag >= 8 ? '#b026ff' : magColor(ev.mag)}">M ${ev.mag.toFixed(1)}</h2>
+    <div class="place" dir="auto" style="text-align:right">${ev.place ?? '—'}</div>
+    <table>
+      <tr><td>סוג עוצמה</td><td>${ev.magType ?? '—'}</td></tr>
+      <tr><td>עומק מוקד</td><td>${ev.depth.toFixed(1)} ק"מ</td></tr>
+      <tr><td>זמן (UTC)</td><td>${t.toISOString().replace('T', ' ').slice(0, 19)}</td></tr>
+      <tr><td>זמן מקומי</td><td>${t.toLocaleString('he-IL')}${ageH < 24 ? ' <span class="badge b-warn">24 ש\' אחרונות</span>' : ''}</td></tr>
+      <tr><td>קואורדינטות</td><td>${ev.lat.toFixed(3)}, ${ev.lon.toFixed(3)}</td></tr>
+      <tr><td>רדיוס השפעה משוער</td><td>~${Math.round(impactRadiusKm(ev.mag, ev.depth))} ק"מ</td></tr>
+      <tr><td>צונאמי</td><td><span class="badge ${ts.cls}">${ts.text}</span></td></tr>
+      ${ev.alert ? `<tr><td>התראת PAGER</td><td>${ev.alert}</td></tr>` : ''}
+      <tr><td>אימות</td><td>${verify}</td></tr>
+      ${ev.verified ? `<tr><td>פער בין מקורות</td><td>ΔM ${ev.magSpread.toFixed(1)} · Δמיקום ${ev.locSpreadKm.toFixed(0)} ק"מ</td></tr>` : ''}
+    </table>
+    <div class="src"><b>דיווחי המקורות:</b>${reports}</div>
+    <div style="font-size:11px;color:#8a96ad;margin-top:10px">הערכת הצונאמי היא היוריסטיקה ויזואלית ואינה תחליף להתרעה רשמית.</div>`;
+  $('info').style.display = 'block';
+}
+$('infoClose').onclick = () => { $('info').style.display = 'none'; };
+
+// ---------------------------------------------------------------- load & filter
+let allEvents = [], refreshTimer = null;
+
+function readFilters() {
+  const start = $('fStart').value, end = $('fEnd').value;
+  return {
+    start, end: isoDate(new Date(Date.parse(end) + DAY)), // סוף היום כולל
+    minMag: +$('fMinMag').value, maxMag: +$('fMaxMag').value,
+    minDepth: +$('fMinDepth').value, maxDepth: +$('fMaxDepth').value,
+    bbox: REGIONS[$('fRegion').value], useEmsc: $('fEmsc').checked, onlyVerified: $('fVerified').checked,
+  };
+}
+
+async function load() {
+  const q = readFilters();
+  $('btnLoad').disabled = true;
+  $('status').textContent = 'טוען נתונים מהמקורות…';
+  const jobs = [fetchUSGS(q)];
+  if (q.useEmsc) jobs.push(fetchEMSC(q));
+  const results = await Promise.allSettled(jobs);
+  const lists = [], notes = [];
+  results.forEach((r, i) => {
+    const name = i === 0 ? 'USGS' : 'EMSC';
+    if (r.status === 'fulfilled') { lists.push(r.value); notes.push(`${name}: ${r.value.length}`); }
+    else notes.push(`${name}: שגיאה (${r.reason.message})`);
+  });
+  allEvents = crossReference(lists);
+  $('btnLoad').disabled = false;
+  render(q, notes);
+
+  clearInterval(refreshTimer);
+  if ($('fEnd').value >= isoDate(new Date())) refreshTimer = setInterval(load, REFRESH_MS);
+}
+
+function render(q = readFilters(), notes = []) {
+  const shown = allEvents.filter(e =>
+    e.mag >= q.minMag && e.mag <= q.maxMag && e.depth >= q.minDepth && e.depth <= q.maxDepth &&
+    (!q.onlyVerified || e.verified));
+  // מציירים חזקות אחרונות כדי שיופיעו מעל החלשות
+  shown.sort((a, b) => a.mag - b.mag);
+  const recent = shown.filter(e => Date.now() - e.time < DAY);
+  globe.pointsData(shown).ringsData(recent);
+
+  const verified = shown.filter(e => e.verified).length;
+  const max = shown.reduce((m, e) => (e.mag > (m?.mag ?? -1) ? e : m), null);
+  $('status').innerHTML = `
+    <b>${shown.length}</b> אירועים מוצגים · <b>${verified}</b> מאומתים · <b>${recent.length}</b> ב-24 ש' האחרונות<br>
+    ${max ? `החזקה ביותר: <b>M${max.mag.toFixed(1)}</b> — <bdi>${max.place ?? ''}</bdi><br>` : ''}
+    ${notes.length ? `מקורות: ${notes.join(' · ')}<br>` : ''}
+    עודכן: ${new Date().toLocaleTimeString('he-IL')}`;
+}
+
+// ---------------------------------------------------------------- init
+$('fEnd').value = isoDate(new Date());
+$('fStart').value = isoDate(new Date(Date.now() - 7 * DAY));
+$('btnLoad').onclick = load;
+$('fVerified').onchange = () => render();
+load();
+</script>
+</body>
+</html>
